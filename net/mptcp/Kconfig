@@ -85,6 +85,15 @@ config MPTCP_ROUNDROBIN
 	  This is a very simple round-robin scheduler. Probably has bad performance
 	  but might be interesting for researchers.
 
+# --- NEW: Weighted Delay Module Definition ---
+config MPTCP_WEIGHTED_DELAY
+    tristate "MPTCP Weighted Delay"
+    depends on (MPTCP=y)
+    ---help---
+      This scheduler selects subflows based on a weighted sum of forward and 
+      reverse delay. Functions similar to RTT other wise.
+# ---------------------------------------------
+
 choice
 	prompt "Default MPTCP Scheduler"
 	default DEFAULT
@@ -103,6 +112,13 @@ choice
 		  This is the round-rob scheduler, sending in a round-robin
 		  fashion..
 
+# --- NEW: Weighted Delay Choice Option ---
+  config DEFAULT_WEIGHTED_DELAY
+    bool "Weighted-Delay" if MPTCP_WEIGHTED_DELAY=y
+      ---help---
+        Sets Weighted Delay as the system default MPTCP scheduler.
+# -----------------------------------------
+
 endchoice
 endif
 
@@ -110,6 +126,9 @@ config DEFAULT_MPTCP_SCHED
 	string
 	depends on (MPTCP=y)
 	default "default" if DEFAULT_SCHEDULER
-	default "roundrobin" if DEFAULT_ROUNDROBIN
+# --- NEW: String Mapping ---
+  default "weighted_delay" if DEFAULT_WEIGHTED_DELAY
+# ---------------------------
+  default "roundrobin" if DEFAULT_ROUNDROBIN
 	default "default"
 
