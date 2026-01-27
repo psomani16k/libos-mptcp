@@ -61,6 +61,9 @@
  *		Pasi Sarolahti:		F-RTO for dealing with spurious RTOs
  */
 
+#include "asm-generic/param.h"
+#include "linux/skbuff.h"
+#include "linux/sysctl.h"
 #define pr_fmt(fmt) "TCP: " fmt
 
 #include <linux/mm.h>
@@ -3787,10 +3790,15 @@ static bool tcp_parse_aligned_timestamp(struct tcp_sock *tp, const struct tcphdr
 		++ptr;
 		tp->rx_opt.rcv_tsval = ntohl(*ptr);
 		++ptr;
-		if (*ptr)
+		if (*ptr){
 			tp->rx_opt.rcv_tsecr = ntohl(*ptr) - tp->tsoffset;
-		else
+      tp->rx_opt.rl_fw_dly = (int)tp->rx_opt.rcv_tsval - (int)tp->rx_opt.rcv_tsecr;
+    }
+		else{
 			tp->rx_opt.rcv_tsecr = 0;
+      tp->rx_opt.rl_fw_dly = 0;
+
+    }
 		return true;
 	}
 	return false;
