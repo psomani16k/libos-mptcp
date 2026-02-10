@@ -62,6 +62,7 @@
  */
 
 #include "asm-generic/param.h"
+#include "linux/printk.h"
 #include "linux/skbuff.h"
 #include "linux/sysctl.h"
 #define pr_fmt(fmt) "TCP: " fmt
@@ -1136,6 +1137,7 @@ struct tcp_sacktag_state {
 	int	fack_count;
 	long	rtt_us; /* RTT measured by SACKing never-retransmitted data */
 	int	flag;
+  long fw_dly;
 };
 
 /* Check if skb is fully within the SACK block. In presence of GSO skbs,
@@ -1244,6 +1246,7 @@ static u8 tcp_sacktag_one(struct sock *sk,
 					skb_mstamp_get(&now);
 					state->rtt_us = skb_mstamp_us_delta(&now,
 								xmit_time);
+          state->fw_dly = tp->rx_opt.rcv_tsval - tp->rx_opt.rcv_tsecr;
 				}
 			}
 
@@ -1642,7 +1645,7 @@ static int tcp_sack_cache_ok(const struct tcp_sock *tp, const struct tcp_sack_bl
 
 static int
 tcp_sacktag_write_queue(struct sock *sk, const struct sk_buff *ack_skb,
-			u32 prior_snd_una, long *sack_rtt_us)
+			u32 prior_snd_una, long *sack_rtt_us, long *fw_dly)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	const unsigned char *ptr = (skb_transport_header(ack_skb) +
@@ -3484,6 +3487,7 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
 	const int prior_unsacked = tp->packets_out - tp->sacked_out;
 	int acked = 0; /* Number of packets newly acked */
 	long sack_rtt_us = -1L;
+  long fw_dly = -1L;
 
 	/* We very likely will need to access write queue head. */
 	prefetchw(sk->sk_write_queue.next);
@@ -3547,7 +3551,7 @@ static int tcp_ack(struct sock *sk, struct sk_buff *skb, int flag)
 
 		if (TCP_SKB_CB(skb)->sacked)
 			flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una,
-							&sack_rtt_us);
+							&sack_rtt_us, &fw_dly);
 
 		if (tcp_ecn_rcv_ecn_echo(tp, tcp_hdr(skb))) {
 			flag |= FLAG_ECE;
@@ -3634,7 +3638,7 @@ old_ack:
 	 */
 	if (TCP_SKB_CB(skb)->sacked) {
 		flag |= tcp_sacktag_write_queue(sk, skb, prior_snd_una,
-						&sack_rtt_us);
+						&sack_rtt_us, &fw_dly);
 		tcp_fastretrans_alert(sk, acked, prior_unsacked,
 				      is_dupack, flag);
 	}
@@ -3724,6 +3728,7 @@ void tcp_parse_options(const struct sk_buff *skb,
 				     (!estab && sysctl_tcp_timestamps))) {
 					opt_rx->saw_tstamp = 1;
 					opt_rx->rcv_tsval = get_unaligned_be32(ptr);
+          // printk("TSval 2: %d - %d\n", opt_rx->rcv_tsval, opt_rx->rcv_tsecr);
 					opt_rx->rcv_tsecr = get_unaligned_be32(ptr + 4);
 				}
 				break;
@@ -3797,8 +3802,8 @@ static bool tcp_parse_aligned_timestamp(struct tcp_sock *tp, const struct tcphdr
 		else{
 			tp->rx_opt.rcv_tsecr = 0;
       tp->rx_opt.rl_fw_dly = 0;
-
     }
+    printk("Relative Forward Delay: %d", tp->rx_opt.rl_fw_dly);
 		return true;
 	}
 	return false;
