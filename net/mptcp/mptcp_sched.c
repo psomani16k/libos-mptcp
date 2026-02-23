@@ -143,9 +143,6 @@ get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
     bool unused = false;
 
     /* Verify the validity of Relative forward delay calculation */
-    s32 rl_fw_dly = (s32)tp->rx_opt.rcv_tsval - (s32)tp->rx_opt.rcv_tsecr;
-    // mptcp_debug("Relative Forward Delay for path - %d : %d\n",
-    //             tp->mptcp->path_index,  rl_fw_dly);
 
     /* First, we choose only the wanted sks */
     if (!(*selector)(tp))
@@ -180,11 +177,10 @@ get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
       found_unused = true;
     }
 
-    // index, src addr, dest addr, srtt_us, fw_dly
-    mptcp_debug("%d, %d, %d, %ld, %ld\n", tp->mptcp->path_index,
-                inet->inet_saddr, inet->inet_daddr, tp->srtt_us, rl_fw_dly);
-    if (tp->srtt_us < min_srtt) {
-      min_srtt = tp->srtt_us;
+    // index, srtt_us, fw_dly
+    mptcp_debug("%d, %d, %d\n", tp->mptcp->path_index,  tp->srtt_us, tp->sfw_dly_us);
+    if (tp->sfw_dly_us < min_srtt) {
+      min_srtt = tp->sfw_dly_us;
       bestsk = sk;
     }
   }

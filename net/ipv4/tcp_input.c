@@ -62,6 +62,7 @@
  */
 
 #include "asm-generic/param.h"
+#include "linux/jiffies.h"
 #include "linux/printk.h"
 #include "linux/skbuff.h"
 #include "linux/sysctl.h"
@@ -688,6 +689,9 @@ static void tcp_event_data_recv(struct sock *sk, struct sk_buff *skb)
 static void tcp_rtt_estimator(struct sock *sk, long mrtt_us)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
+  long fw = (s32)tp->rx_opt.rcv_tsval - (s32)tp->rx_opt.rcv_tsecr;
+  fw = jiffies_to_usecs(fw);
+  u32 fw_dly = tp->sfw_dly_us;
 	long m = mrtt_us; /* RTT */
 	u32 srtt = tp->srtt_us;
 
@@ -747,6 +751,37 @@ static void tcp_rtt_estimator(struct sock *sk, long mrtt_us)
 		tp->rtt_seq = tp->snd_nxt;
 	}
 	tp->srtt_us = max(1U, srtt);
+  if (fw_dly != 0) {
+    fw -= (fw_dly >> 3);
+    fw_dly += fw;
+    if (fw < 0) {
+      fw = -fw;
+      fw -= (tp->mdev_fwd >> 2);
+      if (fw > 0)
+        fw >>= 3;
+    } else {
+      fw -= (tp->mdev_fwd >> 2);
+    }
+    tp->mdev_fwd += fw;
+    if (tp->mdev_fwd > tp->mdev_fwd_max) {
+      tp->mdev_fwd_max = tp->mdev_fwd;
+			if (tp->mdev_fwd_max > tp->fwdvar)
+				tp->fwdvar = tp->mdev_fwd_max;
+    }
+    if (after(tp->snd_una, tp->fwd_seq)) {
+      if (tp->mdev_fwd_max < tp->fwdvar)
+        tp->fwdvar -= (tp->fwdvar - tp->mdev_fwd_max) >> 2;
+      tp->fwd_seq = tp->snd_nxt;
+      tp->mdev_fwd = tcp_rto_min_us(sk);
+    }
+  } else {
+    fw_dly = fw << 3;
+    tp->mdev_fwd = fw << 1;
+    tp->fwdvar = max(tp->mdev_fwd, tcp_rto_min_us(sk));
+    tp->mdev_fwd_max = tp->fwdvar;
+    tp->fwd_seq = tp->snd_nxt;
+  }
+	tp->sfw_dly_us = max(1U, fw_dly);
 }
 
 /* Set the sk_pacing_rate to allow proper sizing of TSO packets.

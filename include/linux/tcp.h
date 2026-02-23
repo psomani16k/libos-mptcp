@@ -262,6 +262,13 @@ struct tcp_sock {
 	u32	rttvar_us;	/* smoothed mdev_max			*/
 	u32	rtt_seq;	/* sequence number to update rttvar	*/
 
+  /* FWDLY calcultion */
+  u32 sfw_dly_us;
+  u32 mdev_fwd;
+  u32 mdev_fwd_max;
+  u32 fwdvar;
+  u32 fwd_seq;
+
 	u32	packets_out;	/* Packets which are "in flight"	*/
 	u32	retrans_out;	/* Retransmitted packets out		*/
 	u32	max_packets_out;  /* max packets_out in last window */
