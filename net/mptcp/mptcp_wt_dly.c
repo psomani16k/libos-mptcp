@@ -4,8 +4,8 @@
 #include <linux/module.h>
 #include <net/mptcp.h>
 
-static DEFINE_SPINLOCK(mptcp_sched_list_lock);
-static LIST_HEAD(mptcp_sched_list);
+// static DEFINE_SPINLOCK(mptcp_sched_list_lock);
+// static LIST_HEAD(mptcp_sched_list);
 
 struct defsched_priv {
   u32 last_rbuf_opti;
@@ -132,7 +132,7 @@ get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
                            bool (*selector)(const struct tcp_sock *),
                            bool zero_wnd_test, bool *force) {
   struct sock *bestsk = NULL;
-  u32 min_srtt = 0xffffffff;
+  u32 min_dly = 0xffffffff;
   bool found_unused = false;
   bool found_unused_una = false;
   struct sock *sk;
@@ -171,16 +171,19 @@ get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
          * sk - thus we reset the bestsk (which might
          * have been set to a used sk).
          */
-        min_srtt = 0xffffffff;
+        min_dly = 0xffffffff;
         bestsk = NULL;
       }
       found_unused = true;
     }
 
     // index, srtt_us, fw_dly
-    mptcp_debug("%d, %d, %d\n", tp->mptcp->path_index,  tp->srtt_us, tp->sfw_dly_us);
-    if (tp->srtt_us < min_srtt) {
-      min_srtt = tp->srtt_us;
+    mptcp_debug("SCHEDULING USING WEIGHTED DELAY SCHEDULER");
+    u32 fw = tp->sfw_dly_us;
+    u32 rv = tp->srtt_us - tp->sfw_dly_us;
+    u32 wt_dly = 1 * fw + 0 * rv;
+    if (wt_dly < min_dly) {
+      min_dly = wt_dly;
       bestsk = sk;
     }
   }
@@ -447,112 +450,127 @@ static void defsched_init(struct sock *sk) {
   dsp->last_rbuf_opti = tcp_time_stamp;
 }
 
-struct mptcp_sched_ops mptcp_sched_default = {
+struct mptcp_sched_ops mptcp_sched_weighted_delay = {
     .get_subflow = get_available_subflow,
     .next_segment = mptcp_next_segment,
     .init = defsched_init,
-    .name = "default",
+    .name = "weighted_delay",
     .owner = THIS_MODULE,
 };
 
-static struct mptcp_sched_ops *mptcp_sched_find(const char *name) {
-  struct mptcp_sched_ops *e;
-
-  list_for_each_entry_rcu(e, &mptcp_sched_list, list) {
-    if (strcmp(e->name, name) == 0)
-      return e;
-  }
-
-  return NULL;
+static int __init mptcp_wt_dly_register(void) {
+  return mptcp_register_scheduler(&mptcp_sched_weighted_delay);
 }
 
-int mptcp_register_scheduler(struct mptcp_sched_ops *sched) {
-  int ret = 0;
-
-  if (!sched->get_subflow || !sched->next_segment)
-    return -EINVAL;
-
-  spin_lock(&mptcp_sched_list_lock);
-  if (mptcp_sched_find(sched->name)) {
-    pr_notice("%s already registered\n", sched->name);
-    ret = -EEXIST;
-  } else {
-    list_add_tail_rcu(&sched->list, &mptcp_sched_list);
-    pr_info("%s registered\n", sched->name);
-  }
-  spin_unlock(&mptcp_sched_list_lock);
-
-  return ret;
-}
-EXPORT_SYMBOL_GPL(mptcp_register_scheduler);
-
-void mptcp_unregister_scheduler(struct mptcp_sched_ops *sched) {
-  spin_lock(&mptcp_sched_list_lock);
-  list_del_rcu(&sched->list);
-  spin_unlock(&mptcp_sched_list_lock);
-}
-EXPORT_SYMBOL_GPL(mptcp_unregister_scheduler);
-
-void mptcp_get_default_scheduler(char *name) {
-  struct mptcp_sched_ops *sched;
-
-  BUG_ON(list_empty(&mptcp_sched_list));
-
-  rcu_read_lock();
-  sched = list_entry(mptcp_sched_list.next, struct mptcp_sched_ops, list);
-  strncpy(name, sched->name, MPTCP_SCHED_NAME_MAX);
-  rcu_read_unlock();
+static void __exit mptcp_wt_dly_unregister(void) {
+  mptcp_unregister_scheduler(&mptcp_sched_weighted_delay);
 }
 
-int mptcp_set_default_scheduler(const char *name) {
-  struct mptcp_sched_ops *sched;
-  int ret = -ENOENT;
+module_init(mptcp_wt_dly_register);
+module_exit(mptcp_wt_dly_unregister);
 
-  spin_lock(&mptcp_sched_list_lock);
-  sched = mptcp_sched_find(name);
-#ifdef CONFIG_MODULES
-  if (!sched && capable(CAP_NET_ADMIN)) {
-    spin_unlock(&mptcp_sched_list_lock);
+MODULE_AUTHOR("Parth");
+MODULE_LICENSE("GPL");
+MODULE_DESCRIPTION("MPTCP Weighted Delay Scheduler");
 
-    request_module("mptcp_%s", name);
-    spin_lock(&mptcp_sched_list_lock);
-    sched = mptcp_sched_find(name);
-  }
-#endif
+// static struct mptcp_sched_ops *mptcp_sched_find(const char *name) {
+//   struct mptcp_sched_ops *e;
+//
+//   list_for_each_entry_rcu(e, &mptcp_sched_list, list) {
+//     if (strcmp(e->name, name) == 0)
+//       return e;
+//   }
+//
+//   return NULL;
+// }
 
-  if (sched) {
-    list_move(&sched->list, &mptcp_sched_list);
-    ret = 0;
-  } else {
-    pr_info("%s is not available\n", name);
-  }
-  spin_unlock(&mptcp_sched_list_lock);
+// int mptcp_register_scheduler(struct mptcp_sched_ops *sched) {
+//   int ret = 0;
+//
+//   if (!sched->get_subflow || !sched->next_segment)
+//     return -EINVAL;
+//
+//   spin_lock(&mptcp_sched_list_lock);
+//   if (mptcp_sched_find(sched->name)) {
+//     pr_notice("%s already registered\n", sched->name);
+//     ret = -EEXIST;
+//   } else {
+//     list_add_tail_rcu(&sched->list, &mptcp_sched_list);
+//     pr_info("%s registered\n", sched->name);
+//   }
+//   spin_unlock(&mptcp_sched_list_lock);
+//
+//   return ret;
+// }
+// EXPORT_SYMBOL_GPL(mptcp_register_scheduler);
 
-  return ret;
-}
+// void mptcp_unregister_scheduler(struct mptcp_sched_ops *sched) {
+//   spin_lock(&mptcp_sched_list_lock);
+//   list_del_rcu(&sched->list);
+//   spin_unlock(&mptcp_sched_list_lock);
+// }
+// EXPORT_SYMBOL_GPL(mptcp_unregister_scheduler);
 
-void mptcp_init_scheduler(struct mptcp_cb *mpcb) {
-  struct mptcp_sched_ops *sched;
+// void mptcp_get_default_scheduler(char *name) {
+//   struct mptcp_sched_ops *sched;
+//
+//   BUG_ON(list_empty(&mptcp_sched_list));
+//
+//   rcu_read_lock();
+//   sched = list_entry(mptcp_sched_list.next, struct mptcp_sched_ops, list);
+//   strncpy(name, sched->name, MPTCP_SCHED_NAME_MAX);
+//   rcu_read_unlock();
+// }
 
-  rcu_read_lock();
-  list_for_each_entry_rcu(sched, &mptcp_sched_list, list) {
-    if (try_module_get(sched->owner)) {
-      mpcb->sched_ops = sched;
-      break;
-    }
-  }
-  rcu_read_unlock();
-}
+// int mptcp_set_default_scheduler(const char *name) {
+//   struct mptcp_sched_ops *sched;
+//   int ret = -ENOENT;
+//
+//   spin_lock(&mptcp_sched_list_lock);
+//   sched = mptcp_sched_find(name);
+// #ifdef CONFIG_MODULES
+//   if (!sched && capable(CAP_NET_ADMIN)) {
+//     spin_unlock(&mptcp_sched_list_lock);
+//
+//     request_module("mptcp_%s", name);
+//     spin_lock(&mptcp_sched_list_lock);
+//     sched = mptcp_sched_find(name);
+//   }
+// #endif
+//
+//   if (sched) {
+//     list_move(&sched->list, &mptcp_sched_list);
+//     ret = 0;
+//   } else {
+//     pr_info("%s is not available\n", name);
+//   }
+//   spin_unlock(&mptcp_sched_list_lock);
+//
+//   return ret;
+// }
+
+// void mptcp_init_scheduler(struct mptcp_cb *mpcb) {
+//   struct mptcp_sched_ops *sched;
+//
+//   rcu_read_lock();
+//   list_for_each_entry_rcu(sched, &mptcp_sched_list, list) {
+//     if (try_module_get(sched->owner)) {
+//       mpcb->sched_ops = sched;
+//       break;
+//     }
+//   }
+//   rcu_read_unlock();
+// }
 
 /* Manage refcounts on socket close. */
-void mptcp_cleanup_scheduler(struct mptcp_cb *mpcb) {
-  module_put(mpcb->sched_ops->owner);
-}
-
-/* Set default value from kernel configuration at bootup */
-static int __init mptcp_scheduler_default(void) {
-  BUILD_BUG_ON(sizeof(struct defsched_priv) > MPTCP_SCHED_SIZE);
-
-  return mptcp_set_default_scheduler(CONFIG_DEFAULT_MPTCP_SCHED);
-}
-late_initcall(mptcp_scheduler_default);
+// void mptcp_cleanup_scheduler(struct mptcp_cb *mpcb) {
+//   module_put(mpcb->sched_ops->owner);
+// }
+//
+// /* Set default value from kernel configuration at bootup */
+// static int __init mptcp_scheduler_default(void) {
+//   BUILD_BUG_ON(sizeof(struct defsched_priv) > MPTCP_SCHED_SIZE);
+//
+//   return mptcp_set_default_scheduler(CONFIG_DEFAULT_MPTCP_SCHED);
+// }
+// late_initcall(mptcp_scheduler_default);
