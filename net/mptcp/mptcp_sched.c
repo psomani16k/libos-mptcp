@@ -132,6 +132,7 @@ get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
                            bool (*selector)(const struct tcp_sock *),
                            bool zero_wnd_test, bool *force) {
   struct sock *bestsk = NULL;
+  struct sock *bestskwt = NULL;
   u32 min_srtt = 0xffffffff;
   bool found_unused = false;
   bool found_unused_una = false;
@@ -177,10 +178,8 @@ get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
       found_unused = true;
     }
 
-    // index, srtt_us, fw_dly
-    mptcp_debug("%d, %d, %d\n", tp->mptcp->path_index,  tp->srtt_us, tp->sfw_dly_us);
-    if (tp->sfw_dly_us < min_srtt) {
-      min_srtt = tp->sfw_dly_us;
+    if (tp->srtt_us < min_srtt) {
+      min_srtt = tp->srtt_us;
       bestsk = sk;
     }
   }

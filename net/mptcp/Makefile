@@ -17,6 +17,7 @@ obj-$(CONFIG_MPTCP_NDIFFPORTS) += mptcp_ndiffports.o
 obj-$(CONFIG_MPTCP_BINDER) += mptcp_binder.o
 obj-$(CONFIG_MPTCP_ROUNDROBIN) += mptcp_rr.o
 obj-$(CONFIG_MPTCP_WEIGHTED_DELAY) += mptcp_wt_dly.o
+obj-$(CONFIG_MPTCP_RBP) += mptcp_rbp.o
 
 mptcp-$(subst m,y,$(CONFIG_IPV6)) += mptcp_ipv6.o
 

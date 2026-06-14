@@ -690,10 +690,11 @@ static void tcp_rtt_estimator(struct sock *sk, long mrtt_us)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
   long fw = (s32)tp->rx_opt.rcv_tsval - (s32)tp->rx_opt.rcv_tsecr;
-  fw = jiffies_to_usecs(fw);
   u32 fw_dly = tp->sfw_dly_us;
 	long m = mrtt_us; /* RTT */
 	u32 srtt = tp->srtt_us;
+
+  fw = jiffies_to_usecs(fw);
 
 	/*	The following amusing code comes from Jacobson's
 	 *	article in SIGCOMM '88.  Note that rtt and mdev
@@ -772,7 +773,7 @@ static void tcp_rtt_estimator(struct sock *sk, long mrtt_us)
       if (tp->mdev_fwd_max < tp->fwdvar)
         tp->fwdvar -= (tp->fwdvar - tp->mdev_fwd_max) >> 2;
       tp->fwd_seq = tp->snd_nxt;
-      tp->mdev_fwd = tcp_rto_min_us(sk);
+      tp->mdev_fwd_max = tcp_rto_min_us(sk);
     }
   } else {
     fw_dly = fw << 3;

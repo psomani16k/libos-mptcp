@@ -128,11 +128,13 @@ static bool subflow_is_active(const struct tcp_sock *tp) {
  * best one
  */
 static struct sock *
-get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
-                           bool (*selector)(const struct tcp_sock *),
-                           bool zero_wnd_test, bool *force) {
+wt_dly_get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
+                                  bool (*selector)(const struct tcp_sock *),
+                                  bool zero_wnd_test, bool *force) {
   struct sock *bestsk = NULL;
-  u32 min_dly = 0xffffffff;
+  struct sock *bestsk_rtt = NULL;
+  u64 min_dly = 0xffffffffffffff;
+  u64 min_rtt = 0xffffffffffffff;
   bool found_unused = false;
   bool found_unused_una = false;
   struct sock *sk;
@@ -178,13 +180,22 @@ get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
     }
 
     // index, srtt_us, fw_dly
-    mptcp_debug("SCHEDULING USING WEIGHTED DELAY SCHEDULER");
+    mptcp_debug("SCHEDULING USING WEIGHTED DELAY SCHEDULER\n");
     u32 fw = tp->sfw_dly_us;
     u32 rv = tp->srtt_us - tp->sfw_dly_us;
-    u32 wt_dly = 1 * fw + 0 * rv;
+    u64 wt_dly = 1 * fw + 0 * rv;
     if (wt_dly < min_dly) {
       min_dly = wt_dly;
       bestsk = sk;
+    }
+    if (tp->srtt_us < min_rtt) {
+      min_rtt = tp->srtt_us;
+      bestsk_rtt = sk;
+    }
+    if (bestsk && bestsk_rtt && bestsk != bestsk_rtt) {
+      mptcp_debug("Diff in scheduling: minRtt = %d, wtDly = %d\n",
+                  tcp_sk(bestsk_rtt)->mptcp->path_index,
+                  tcp_sk(bestsk)->mptcp->path_index);
     }
   }
 
@@ -216,9 +227,9 @@ get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
  *
  * Additionally, this function is aware of the backup-subflows.
  */
-static struct sock *get_available_subflow(struct sock *meta_sk,
-                                          struct sk_buff *skb,
-                                          bool zero_wnd_test) {
+static struct sock *wt_dly_get_available_subflow(struct sock *meta_sk,
+                                                 struct sk_buff *skb,
+                                                 bool zero_wnd_test) {
   struct mptcp_cb *mpcb = tcp_sk(meta_sk)->mpcb;
   struct sock *sk;
   bool force;
@@ -241,16 +252,16 @@ static struct sock *get_available_subflow(struct sock *meta_sk,
   }
 
   /* Find the best subflow */
-  sk = get_subflow_from_selectors(mpcb, skb, &subflow_is_active, zero_wnd_test,
-                                  &force);
+  sk = wt_dly_get_subflow_from_selectors(mpcb, skb, &subflow_is_active,
+                                         zero_wnd_test, &force);
   if (force)
     /* one unused active sk or one NULL sk when there is at least
      * one temporally unavailable unused active sk
      */
     return sk;
 
-  sk = get_subflow_from_selectors(mpcb, skb, &subflow_is_backup, zero_wnd_test,
-                                  &force);
+  sk = wt_dly_get_subflow_from_selectors(mpcb, skb, &subflow_is_backup,
+                                         zero_wnd_test, &force);
   if (!force && skb)
     /* one used backup sk or one NULL sk where there is no one
      * temporally unavailable unused backup sk
@@ -368,7 +379,7 @@ static struct sk_buff *__mptcp_next_segment(struct sock *meta_sk,
     if (!skb && meta_sk->sk_socket &&
         test_bit(SOCK_NOSPACE, &meta_sk->sk_socket->flags) &&
         sk_stream_wspace(meta_sk) < sk_stream_min_wspace(meta_sk)) {
-      struct sock *subsk = get_available_subflow(meta_sk, NULL, false);
+      struct sock *subsk = wt_dly_get_available_subflow(meta_sk, NULL, false);
       if (!subsk)
         return NULL;
 
@@ -395,7 +406,7 @@ static struct sk_buff *mptcp_next_segment(struct sock *meta_sk, int *reinject,
   if (!skb)
     return NULL;
 
-  *subsk = get_available_subflow(meta_sk, skb, false);
+  *subsk = wt_dly_get_available_subflow(meta_sk, skb, false);
   if (!*subsk)
     return NULL;
 
@@ -451,7 +462,7 @@ static void defsched_init(struct sock *sk) {
 }
 
 struct mptcp_sched_ops mptcp_sched_weighted_delay = {
-    .get_subflow = get_available_subflow,
+    .get_subflow = wt_dly_get_available_subflow,
     .next_segment = mptcp_next_segment,
     .init = defsched_init,
     .name = "weighted_delay",
