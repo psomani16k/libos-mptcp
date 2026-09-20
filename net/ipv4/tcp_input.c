@@ -691,9 +691,22 @@ static void tcp_rtt_estimator(struct sock *sk, long mrtt_us)
 	struct tcp_sock *tp = tcp_sk(sk);
   long fw = (s32)tp->rx_opt.rcv_tsval - (s32)tp->rx_opt.rcv_tsecr;
   u32 fw_dly = tp->sfw_dly_us;
+  
+  // if (tp->mptcp && tp->mptcp->path_index) {
+  //   printk("fw_dly: %u, path: %d\n", jiffies_to_msecs(fw), tp->mptcp->path_index);
+  // } else {
+  //   printk("fw_dly: %u, path: NONE\n", jiffies_to_msecs(fw));
+  // }
+
 	long m = mrtt_us; /* RTT */
 	u32 srtt = tp->srtt_us;
 
+  /* fw is a diff of TCP timestamp-option values (rcv_tsval - rcv_tsecr).
+   * jiffies_to_usecs() multiplies by 1000000/HZ (4000 us at HZ=250), so this
+   * only yields correct us when the TCP timestamp clock is jiffies-based --
+   * which it is here, since tcp_time_stamp is driven by jiffies. If the
+   * timestamp granularity ever diverges from HZ, this conversion breaks.
+   */
   fw = jiffies_to_usecs(fw);
 
 	/*	The following amusing code comes from Jacobson's

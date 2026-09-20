@@ -180,7 +180,7 @@ wt_dly_get_subflow_from_selectors(struct mptcp_cb *mpcb, struct sk_buff *skb,
     }
 
     // index, srtt_us, fw_dly
-    mptcp_debug("SCHEDULING USING WEIGHTED DELAY SCHEDULER\n");
+    // mptcp_debug("SCHEDULING USING WEIGHTED DELAY SCHEDULER\n");
     u32 fw = tp->sfw_dly_us;
     u32 rv = tp->srtt_us - tp->sfw_dly_us;
     u64 wt_dly = 1 * fw + 0 * rv;
