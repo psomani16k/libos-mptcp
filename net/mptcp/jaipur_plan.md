@@ -92,7 +92,8 @@ written. All are `#define`s at the top of the file.
 | Gain | `Δt_us · k / 1000`, clamped to 1.0 | `k` is per ms; clamp is arithmetic safety after idle periods |
 | cwnd floor | 2 packets in both phases | `cc.md` only states it for slow start; needed in CA too |
 | Rounding of `cwnd · (1 − P)` | round to nearest | Truncation would drop cwnd by ≥ 1 packet on every ACK with any `P > 0` |
-| Slow start test | `cwnd <= ssthresh` | Kernel 4.1 convention, required by `tcp_slow_start()`; `cc.md` says `<` |
+| Slow start test, growth | `cwnd <= ssthresh` | Kernel 4.1 convention, required by `tcp_slow_start()`; `cc.md` says `<` |
+| Slow start test, decrease | `cwnd < ssthresh` | As in `cc.md`. The early exit leaves `cwnd == ssthresh`; with `<=` every later ACK would halve again instead of using the proportional rule |
 
 ## Step 1 — per-subflow state
 
@@ -151,7 +152,7 @@ if (!mptcp(tp)) {                /* plain TCP: Reno fallback, unchanged */
 P = ca->pressure;
 
 if (P > 0) {                     /* early congestion: decrease */
-  if (tp->snd_cwnd <= tp->snd_ssthresh)
+  if (tp->snd_cwnd < tp->snd_ssthresh)     /* strict, as in cc.md */
     tp->snd_ssthresh = max(tp->snd_cwnd >> 1, 2U);
   else
     tp->snd_ssthresh = max(round(cwnd * (SCALE - P) / SCALE), 2U);
@@ -226,7 +227,7 @@ Not addressed in the PoC. Each lists where the fix would slot in.
 
 | # | Issue | Expected PoC symptom | Where the fix goes |
 |---|---|---|---|
-| 1 | Decrease fires on every ACK with `P > 0` | cwnd pinned near 2, low throughput | `snd_nxt` marker in the state (Vegas pattern), gate in the `P > 0` branch |
+| 1 | ~~Decrease fires on every ACK with `P > 0`~~ **Done 13 Oct 2026:** `cut_end_seq` holds `snd_nxt` at the last effective cut; while `before(ack, cut_end_seq)` a `P > 0` ACK neither cuts nor grows (`held` counter in the trace) | was: 53 → 12 cascades in 40 ms on the uncongested path | `snd_nxt` marker in the state (Vegas pattern), gate in the `P > 0` branch |
 | 2 | No dead band around `P = 0` | cwnd sawtooth driven by noise | Threshold constant in the `P > 0` test |
 | 3 | `k_u`, `k_d` are GCC defaults, untuned | `γ` too fast or too slow for these paths | `#define`s |
 | 4 | `μ` denominator is absolute OWD, which includes the clock offset | None in DCE if node clocks are aligned; wrong on real hosts | Step 2, normalisation of `q` |
